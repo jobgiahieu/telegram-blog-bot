@@ -13,11 +13,11 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
 BLOG_URL = "https://blogvnpt.blogspot.com"
 PORT = int(os.environ.get('PORT', 10000))
 
-# Pattern để phát hiện mã sản phẩm
-PRODUCT_PATTERN = re.compile(r'\b[A-Z0-9]{5,10}\b', re.IGNORECASE)
+# Pattern để phát hiện mã sản phẩm (linh hoạt hơn)
+PRODUCT_PATTERN = re.compile(r'\b[A-Z][A-Z0-9]{3,15}\b', re.IGNORECASE)
 
 
-# ===== HTTP SERVER (để Render không báo lỗi) =====
+# ===== HTTP SERVER =====
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -26,7 +26,6 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.wfile.write(b'<h1>Telegram Bot is Running!</h1>')
     
     def log_message(self, format, *args):
-        # Tắt log của HTTP server để không spam
         pass
 
 
@@ -38,33 +37,54 @@ def run_http_server():
 
 
 def search_blogspot(keyword):
-    """Tìm kiếm từ khóa trên blog"""
+    """Tìm kiếm từ khóa trên blog - CẢI TIẾN"""
     search_url = f"{BLOG_URL}/search?q={quote(keyword)}"
     
     try:
+        print(f"🔎 Đang tìm kiếm: {search_url}")
+        
         response = requests.get(search_url, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        first_post = soup.find('h3', class_='post-title entry-title')
+        # Tìm TẤT CẢ các bài viết
+        posts = soup.find_all('h3', class_='post-title')
+        if not posts:
+            posts = soup.find_all('h3', class_='entry-title')
         
-        if first_post and first_post.find('a'):
-            post_url = first_post.find('a')['href']
-            post_title = first_post.get_text(strip=True)
-            
-            if keyword.lower() in post_title.lower():
-                return {
-                    'found': True,
-                    'url': post_url,
-                    'title': post_title
-                }
-            
+        print(f"📊 Tìm thấy {len(posts)} bài viết")
+        
+        # Duyệt qua từng bài viết
+        for post in posts:
+            link = post.find('a')
+            if link:
+                post_url = link.get('href', '')
+                post_title = link.get_text(strip=True)
+                
+                print(f"📄 Kiểm tra: {post_title}")
+                
+                # Tìm kiếm linh hoạt hơn (không phân biệt hoa thường, dấu)
+                keyword_lower = keyword.lower().replace('-', '').replace('_', '')
+                title_lower = post_title.lower().replace('-', '').replace('_', '')
+                
+                if keyword_lower in title_lower:
+                    print(f"✅ Khớp! {post_title}")
+                    return {
+                        'found': True,
+                        'url': post_url,
+                        'title': post_title
+                    }
+        
+        # Nếu không tìm thấy bài viết chính xác, trả về link search
+        if len(posts) > 0:
+            print(f"⚠️ Không khớp chính xác, trả về link search")
             return {
                 'found': True,
                 'url': search_url,
                 'title': f'Kết quả tìm kiếm "{keyword}"'
             }
         
+        print(f"❌ Không tìm thấy bài viết nào")
         return {'found': False}
         
     except Exception as e:
@@ -78,11 +98,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     message_text = update.message.text
+    
+    print(f"💬 Nhận tin nhắn: {message_text}")
+    
+    # Tìm tất cả các mã sản phẩm trong tin nhắn
     matches = PRODUCT_PATTERN.findall(message_text)
     
     if not matches:
+        print(f"⏭️ Không phát hiện mã sản phẩm")
         return
     
+    # Lấy mã đầu tiên tìm được
     keyword = matches[0]
     print(f"🔍 Phát hiện từ khóa: {keyword}")
     
@@ -98,6 +124,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"✅ Đã gửi link cho: {keyword}")
     else:
         print(f"❌ Không tìm thấy: {keyword}")
+        # Không reply nếu không tìm thấy
 
 
 def main():
@@ -107,6 +134,7 @@ def main():
     print("=" * 50)
     print(f"📱 Blog: {BLOG_URL}")
     print(f"🔌 Port: {PORT}")
+    print(f"🔍 Pattern: {PRODUCT_PATTERN.pattern}")
     print("=" * 50)
     
     # Chạy HTTP server trong thread riêng
