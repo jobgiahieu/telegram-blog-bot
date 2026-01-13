@@ -1,6 +1,7 @@
 import re
 import os
 import threading
+import asyncio
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 import requests
@@ -134,28 +135,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if result['found']:
         posts = result['posts']
         
-        # Tạo reply với NHIỀU kết quả
-        reply_lines = [f"🔍 Tìm thấy {len(posts)} bài viết cho: **{keyword}**\n"]
+        # Gửi tin nhắn header
+        header = f"🔍 Tìm thấy {len(posts)} bài viết cho: {keyword}"
+        await update.message.reply_text(header)
         
+        # Gửi TỪNG bài viết riêng biệt với preview
         for i, post in enumerate(posts, 1):
-            # Rút gọn tiêu đề nếu quá dài
-            title = post['title']
-            if len(title) > 80:
-                title = title[:77] + "..."
+            # Format: Tiêu đề + Link (Telegram tự hiển thị preview)
+            message = f"📝 {post['title']}\n🔗 {post['url']}"
             
-            reply_lines.append(f"{i}. [{title}]({post['url']})")
+            try:
+                await update.message.reply_text(
+                    message,
+                    disable_web_page_preview=False  # BẬT preview!
+                )
+                # Delay nhỏ tránh spam
+                import asyncio
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                print(f"⚠️ Lỗi gửi tin {i}: {e}")
         
-        reply_text = "\n\n".join(reply_lines)
-        
-        # Telegram giới hạn 4096 ký tự
-        if len(reply_text) > 4000:
-            reply_text = "\n\n".join(reply_lines[:3]) + f"\n\n... và {len(posts)-3} bài viết khác"
-        
-        await update.message.reply_text(
-            reply_text,
-            parse_mode='Markdown',
-            disable_web_page_preview=True
-        )
         print(f"✅ Đã gửi {len(posts)} link cho: {keyword}")
     else:
         print(f"❌ Không tìm thấy: {keyword}")
