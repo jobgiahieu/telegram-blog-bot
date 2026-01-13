@@ -150,10 +150,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     disable_web_page_preview=False  # BẬT preview!
                 )
                 # Delay nhỏ tránh spam
-                import asyncio
                 await asyncio.sleep(0.5)
             except Exception as e:
                 print(f"⚠️ Lỗi gửi tin {i}: {e}")
+        
+        # Gửi tin nhắn cuối với link blog
+        footer = f"🔍 Tìm thêm bài viết hữu ích tại: {BLOG_URL}\n👍 Nhớ lưu lại để tham khảo nhé!"
+        await update.message.reply_text(footer, disable_web_page_preview=False)
         
         print(f"✅ Đã gửi {len(posts)} link cho: {keyword}")
     else:
