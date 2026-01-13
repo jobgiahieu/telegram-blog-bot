@@ -13,7 +13,7 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
 BLOG_URL = "https://blogvnpt.blogspot.com"
 PORT = int(os.environ.get('PORT', 10000))
 
-# Pattern để phát hiện mã sản phẩm (linh hoạt hơn)
+# Pattern để phát hiện mã sản phẩm
 PRODUCT_PATTERN = re.compile(r'\b[A-Z][A-Z0-9]{3,15}\b', re.IGNORECASE)
 
 
@@ -37,51 +37,70 @@ def run_http_server():
 
 
 def search_blogspot(keyword):
-    """Tìm kiếm từ khóa trên blog - CẢI TIẾN"""
+    """Tìm kiếm từ khóa trên blog - LINH HOẠT HƠN"""
     search_url = f"{BLOG_URL}/search?q={quote(keyword)}"
     
     try:
         print(f"🔎 Đang tìm kiếm: {search_url}")
         
-        response = requests.get(search_url, timeout=10)
+        response = requests.get(search_url, timeout=10, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Tìm TẤT CẢ các bài viết
-        posts = soup.find_all('h3', class_='post-title')
-        if not posts:
-            posts = soup.find_all('h3', class_='entry-title')
+        # Tìm TẤT CẢ các thẻ <a> có chứa từ khóa
+        all_links = soup.find_all('a', href=True)
         
-        print(f"📊 Tìm thấy {len(posts)} bài viết")
+        found_posts = []
+        for link in all_links:
+            href = link.get('href', '')
+            text = link.get_text(strip=True)
+            
+            # Kiểm tra link có phải là bài viết không
+            if BLOG_URL in href and '/20' in href and '.html' in href:
+                # Kiểm tra từ khóa có trong tiêu đề không
+                keyword_clean = keyword.lower().replace('-', '').replace('_', '')
+                text_clean = text.lower().replace('-', '').replace('_', '')
+                
+                if keyword_clean in text_clean and len(text) > 10:
+                    found_posts.append({
+                        'url': href,
+                        'title': text
+                    })
+                    print(f"📄 Tìm thấy: {text}")
         
-        # Duyệt qua từng bài viết
-        for post in posts:
-            link = post.find('a')
-            if link:
-                post_url = link.get('href', '')
-                post_title = link.get_text(strip=True)
-                
-                print(f"📄 Kiểm tra: {post_title}")
-                
-                # Tìm kiếm linh hoạt hơn (không phân biệt hoa thường, dấu)
-                keyword_lower = keyword.lower().replace('-', '').replace('_', '')
-                title_lower = post_title.lower().replace('-', '').replace('_', '')
-                
-                if keyword_lower in title_lower:
-                    print(f"✅ Khớp! {post_title}")
-                    return {
-                        'found': True,
-                        'url': post_url,
-                        'title': post_title
-                    }
+        print(f"📊 Tìm thấy {len(found_posts)} bài viết")
         
-        # Nếu không tìm thấy bài viết chính xác, trả về link search
-        if len(posts) > 0:
-            print(f"⚠️ Không khớp chính xác, trả về link search")
+        # Trả về bài viết đầu tiên
+        if found_posts:
+            return {
+                'found': True,
+                'url': found_posts[0]['url'],
+                'title': found_posts[0]['title']
+            }
+        
+        # Nếu không tìm thấy, thử tìm kiếm rộng hơn
+        print("🔄 Thử tìm kiếm rộng hơn...")
+        
+        # Tìm tất cả các link bài viết
+        post_links = []
+        for link in all_links:
+            href = link.get('href', '')
+            text = link.get_text(strip=True)
+            
+            if BLOG_URL in href and '/20' in href and '.html' in href and len(text) > 10:
+                post_links.append({
+                    'url': href,
+                    'title': text
+                })
+        
+        if post_links:
+            print(f"⚠️ Không tìm thấy khớp chính xác, trả về link search")
             return {
                 'found': True,
                 'url': search_url,
-                'title': f'Kết quả tìm kiếm "{keyword}"'
+                'title': f'Kết quả tìm kiếm "{keyword}" ({len(post_links)} bài viết)'
             }
         
         print(f"❌ Không tìm thấy bài viết nào")
@@ -124,7 +143,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"✅ Đã gửi link cho: {keyword}")
     else:
         print(f"❌ Không tìm thấy: {keyword}")
-        # Không reply nếu không tìm thấy
 
 
 def main():
