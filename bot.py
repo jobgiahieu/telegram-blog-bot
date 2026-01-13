@@ -12,9 +12,10 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 BOT_TOKEN = os.environ.get('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
 BLOG_URL = "https://blogvnpt.blogspot.com"
 PORT = int(os.environ.get('PORT', 10000))
+MAX_RESULTS = 5  # Số kết quả tối đa
 
-# Pattern để phát hiện mã sản phẩm
-PRODUCT_PATTERN = re.compile(r'\b[A-Z][A-Z0-9]{3,15}\b', re.IGNORECASE)
+# Pattern linh hoạt: cho phép dấu gạch ngang và gạch dưới
+PRODUCT_PATTERN = re.compile(r'\b[A-Z][A-Z0-9\-\_]{2,20}\b', re.IGNORECASE)
 
 
 # ===== HTTP SERVER =====
@@ -30,14 +31,14 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 
 
 def run_http_server():
-    """Chạy HTTP server để Render không báo lỗi port"""
+    """Chạy HTTP server"""
     server = HTTPServer(('0.0.0.0', PORT), HealthCheckHandler)
     print(f"🌐 HTTP Server đang chạy trên port {PORT}")
     server.serve_forever()
 
 
 def search_blogspot(keyword):
-    """Tìm kiếm từ khóa trên blog - LINH HOẠT HƠN"""
+    """Tìm kiếm và trả về NHIỀU kết quả"""
     search_url = f"{BLOG_URL}/search?q={quote(keyword)}"
     
     try:
@@ -49,58 +50,57 @@ def search_blogspot(keyword):
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Tìm TẤT CẢ các thẻ <a> có chứa từ khóa
         all_links = soup.find_all('a', href=True)
         
         found_posts = []
+        seen_urls = set()
+        
         for link in all_links:
             href = link.get('href', '')
             text = link.get_text(strip=True)
             
-            # Kiểm tra link có phải là bài viết không
+            # Chỉ lấy link bài viết
             if BLOG_URL in href and '/20' in href and '.html' in href:
-                # Kiểm tra từ khóa có trong tiêu đề không
-                keyword_clean = keyword.lower().replace('-', '').replace('_', '')
-                text_clean = text.lower().replace('-', '').replace('_', '')
+                if href in seen_urls or len(text) < 10:
+                    continue
+                seen_urls.add(href)
                 
-                if keyword_clean in text_clean and len(text) > 10:
+                # So khớp linh hoạt
+                keyword_clean = keyword.lower().replace('-', '').replace('_', '').replace(' ', '')
+                text_clean = text.lower().replace('-', '').replace('_', '').replace(' ', '')
+                
+                if keyword_clean in text_clean:
                     found_posts.append({
                         'url': href,
                         'title': text
                     })
-                    print(f"📄 Tìm thấy: {text}")
+                    print(f"📄 Tìm thấy: {text[:50]}...")
+                    
+                    # Giới hạn số kết quả
+                    if len(found_posts) >= MAX_RESULTS:
+                        break
         
-        print(f"📊 Tìm thấy {len(found_posts)} bài viết")
+        print(f"📊 Tổng cộng tìm thấy {len(found_posts)} bài viết")
         
-        # Trả về bài viết đầu tiên
         if found_posts:
             return {
                 'found': True,
-                'url': found_posts[0]['url'],
-                'title': found_posts[0]['title']
+                'posts': found_posts  # Trả về LIST thay vì 1 bài
             }
         
-        # Nếu không tìm thấy, thử tìm kiếm rộng hơn
-        print("🔄 Thử tìm kiếm rộng hơn...")
+        # Nếu không tìm thấy khớp chính xác
+        print("⚠️ Không tìm thấy bài viết khớp")
         
-        # Tìm tất cả các link bài viết
-        post_links = []
-        for link in all_links:
-            href = link.get('href', '')
-            text = link.get_text(strip=True)
-            
-            if BLOG_URL in href and '/20' in href and '.html' in href and len(text) > 10:
-                post_links.append({
-                    'url': href,
-                    'title': text
-                })
+        # Đếm tổng số bài viết trong kết quả search
+        post_count = len([l for l in all_links if BLOG_URL in l.get('href', '') and '.html' in l.get('href', '')])
         
-        if post_links:
-            print(f"⚠️ Không tìm thấy khớp chính xác, trả về link search")
+        if post_count > 0:
             return {
                 'found': True,
-                'url': search_url,
-                'title': f'Kết quả tìm kiếm "{keyword}" ({len(post_links)} bài viết)'
+                'posts': [{
+                    'url': search_url,
+                    'title': f'Xem {post_count} kết quả tìm kiếm cho "{keyword}"'
+                }]
             }
         
         print(f"❌ Không tìm thấy bài viết nào")
@@ -112,7 +112,7 @@ def search_blogspot(keyword):
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Xử lý tin nhắn trong group"""
+    """Xử lý tin nhắn"""
     if not update.message or not update.message.text:
         return
     
@@ -120,27 +120,43 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     print(f"💬 Nhận tin nhắn: {message_text}")
     
-    # Tìm tất cả các mã sản phẩm trong tin nhắn
     matches = PRODUCT_PATTERN.findall(message_text)
     
     if not matches:
         print(f"⏭️ Không phát hiện mã sản phẩm")
         return
     
-    # Lấy mã đầu tiên tìm được
     keyword = matches[0]
     print(f"🔍 Phát hiện từ khóa: {keyword}")
     
     result = search_blogspot(keyword)
     
     if result['found']:
-        reply_text = (
-            f"🔍 Tìm thấy: {keyword}\n"
-            f"📝 {result['title']}\n"
-            f"🔗 {result['url']}"
+        posts = result['posts']
+        
+        # Tạo reply với NHIỀU kết quả
+        reply_lines = [f"🔍 Tìm thấy {len(posts)} bài viết cho: **{keyword}**\n"]
+        
+        for i, post in enumerate(posts, 1):
+            # Rút gọn tiêu đề nếu quá dài
+            title = post['title']
+            if len(title) > 80:
+                title = title[:77] + "..."
+            
+            reply_lines.append(f"{i}. [{title}]({post['url']})")
+        
+        reply_text = "\n\n".join(reply_lines)
+        
+        # Telegram giới hạn 4096 ký tự
+        if len(reply_text) > 4000:
+            reply_text = "\n\n".join(reply_lines[:3]) + f"\n\n... và {len(posts)-3} bài viết khác"
+        
+        await update.message.reply_text(
+            reply_text,
+            parse_mode='Markdown',
+            disable_web_page_preview=True
         )
-        await update.message.reply_text(reply_text, disable_web_page_preview=False)
-        print(f"✅ Đã gửi link cho: {keyword}")
+        print(f"✅ Đã gửi {len(posts)} link cho: {keyword}")
     else:
         print(f"❌ Không tìm thấy: {keyword}")
 
@@ -152,14 +168,13 @@ def main():
     print("=" * 50)
     print(f"📱 Blog: {BLOG_URL}")
     print(f"🔌 Port: {PORT}")
+    print(f"📊 Max results: {MAX_RESULTS}")
     print(f"🔍 Pattern: {PRODUCT_PATTERN.pattern}")
     print("=" * 50)
     
-    # Chạy HTTP server trong thread riêng
     http_thread = threading.Thread(target=run_http_server, daemon=True)
     http_thread.start()
     
-    # Khởi động bot
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
